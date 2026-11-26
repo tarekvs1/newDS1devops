@@ -1,35 +1,210 @@
-pipeline{
+
+pipeline {
     agent any
-    stages{
-        stage("Checkout"){
-            steps{
 
-            }
-        }
-        stage("Setup"){
-            steps{
-                
-            }
-        }
-        stage("Build"){
-            steps{
-                
-            }
-        }
-        stage("Run (Docker)"){
-            steps{
+    options {
+        disableConcurrentBuilds()
+    }
 
-            }
-        }
-        stage("smoke test"){
-            steps{
+    environment {
+        PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
+    }
 
+    stages {
+
+        // 1. CHECKOUT
+        stage("Checkout") {
+            steps {
+                echo "Source code checked out from GitHub"
+                echo "Full Build Pipeline for dev branch"
             }
         }
-        stage("Archive Artifacts"){
-            steps{
-                
+
+        // 2. SETUP
+        stage("Setup") {
+            steps {
+                bat 'node --version'
+                bat 'docker --version'
+
+                bat 'if not exist artifacts mkdir artifacts'
+
+                echo "Environment setup completed"
             }
+        }
+
+        // 3. BUILD + PARALLEL CHECKS
+        stage("Build") {
+            steps {
+                script {
+
+                    if (!fileExists("index.html")) {
+                        error "index.html does not exist"
+                    }
+
+                    if (!fileExists("style.css")) {
+                        error "style.css does not exist"
+                    }
+
+                    if (!fileExists("script.js")) {
+                        error "script.js does not exist"
+                    }
+
+                    if (!fileExists("Dockerfile")) {
+                        error "Dockerfile does not exist"
+                    }
+
+                    echo "All TaskFlow files are available"
+
+                    // Parallel JavaScript syntax checks
+                    def checks = [:]
+
+                    ["22", "24"].each { version ->
+                        checks["Node.js ${version}"] = {
+                            bat """
+                                docker run --rm ^
+                                -v "%WORKSPACE%:/app" ^
+                                -w /app ^
+                                node:${version}-alpine ^
+                                node --check script.js
+                            """
+                        }
+                    }
+
+                    parallel checks
+
+                    echo "Parallel checks completed successfully"
+
+                    // Docker image build + build log
+                    bat """
+                        docker build -t taskflow-push:%BUILD_NUMBER% . > artifacts\\build.log 2>&1
+                    """
+
+                    echo "Docker image built successfully"
+                }
+            }
+        }
+
+        // 4. RUN DOCKER
+        stage("Run (Docker)") {
+            steps {
+                bat 'docker run -d --name taskflow-push-%BUILD_NUMBER% -p 8082:80 taskflow-push:%BUILD_NUMBER%'
+
+                echo "TaskFlow container started successfully"
+            }
+        }
+
+        // 5. SMOKE TEST
+        stage("Smoke Test") {
+            steps {
+                script {
+
+                    def result = powershell(
+                        returnStatus: true,
+                        script: '''
+                            $url = "http://localhost:8082"
+                            $success = $false
+
+                            for ($i = 1; $i -le 10; $i++) {
+                                try {
+                                    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
+
+                                    if ($response.StatusCode -eq 200) {
+                                        $success = $true
+                                        break
+                                    }
+                                }
+                                catch {
+                                    Start-Sleep -Seconds 2
+                                }
+                            }
+
+                            if ($success) {
+                                "PASSED - TaskFlow is responding correctly" |
+                                    Out-File -FilePath "artifacts/smoke-test.txt" -Encoding utf8
+                                exit 0
+                            }
+                            else {
+                                "FAILED - TaskFlow is not responding" |
+                                    Out-File -FilePath "artifacts/smoke-test.txt" -Encoding utf8
+                                exit 1
+                            }
+                        '''
+                    )
+
+                    if (result != 0) {
+                        error "Smoke Test Failed"
+                    }
+
+                    echo "Smoke Test Passed"
+                }
+            }
+        }
+
+        // 6. ARCHIVE ARTIFACTS
+        stage("Archive Artifacts") {
+            steps {
+                bat 'docker logs taskflow-push-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
+
+                echo "Docker logs saved successfully"
+            }
+        }
+    }
+
+    // POST ACTIONS
+    post {
+
+        always {
+            script {
+
+                // Save Docker logs if the container exists
+                bat '''
+                    docker logs taskflow-push-%BUILD_NUMBER% > artifacts\\docker.log 2>&1 || echo Container logs unavailable > artifacts\\docker.log
+                '''
+
+                // Generate pipeline report
+                def report = """
+TASKFLOW PIPELINE REPORT
+========================
+
+Job Name: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Build URL: ${env.BUILD_URL}
+Branch: dev
+Build Result: ${currentBuild.currentResult}
+
+Artifacts:
+- build.log
+- smoke-test.txt
+- docker.log
+- pipeline-report.txt
+"""
+
+                writeFile(
+                    file: 'artifacts/pipeline-report.txt',
+                    text: report
+                )
+
+                // Archive all artifacts, even after failure
+                archiveArtifacts(
+                    artifacts: 'artifacts/*',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
+            }
+
+            // Docker cleanup
+            bat 'docker rm -f taskflow-push-%BUILD_NUMBER% 2>nul || exit /b 0'
+
+            echo "Docker container cleanup completed"
+            echo "Artifacts archived"
+        }
+
+        success {
+            echo "FULL BUILD PIPELINE PASSED"
+        }
+
+        failure {
+            echo "FULL BUILD PIPELINE FAILED"
         }
     }
 }
