@@ -1,0 +1,35 @@
+pipeline{
+    agent any
+    stages{
+        stage("Checkout"){
+            steps{
+
+            }
+        }
+        stage("Setup"){
+            steps{
+                
+            }
+        }
+        stage("Build"){
+            steps{
+                
+            }
+        }
+        stage("Run (Docker)"){
+            steps{
+
+            }
+        }
+        stage("smoke test"){
+            steps{
+
+            }
+        }
+        stage("Archive Artifacts"){
+            steps{
+                
+            }
+        }
+    }
+}
