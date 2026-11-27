@@ -28,22 +28,13 @@ pipeline {
                 /*pushin it tag*/
                 /*push now in tag v1.0.1*/
                 script {
-    def output = bat(
-        script: '@echo off\r\ngit describe --tags --exact-match HEAD',
+    def version = bat(
+        script: '@git describe --tags --exact-match HEAD',
         returnStdout: true
-    )
-
-    echo "Raw output: [${output}]"
-
-    def version = output.readLines()
-        .collect { it.trim() }
-        .find { it ==~ /v[0-9]+\.[0-9]+\.[0-9]+/ }
-
-    if (!version) {
-        error "Invalid version tag. Expected vX.Y.Z, got: ${output}"
-    }
+    ).trim()
 
     env.TAG_NAME = version
+
     echo "Version detected: ${env.TAG_NAME}"
 }
             }
