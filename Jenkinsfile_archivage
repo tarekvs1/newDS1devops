@@ -6,9 +6,6 @@ pipeline {
         disableConcurrentBuilds()
     }
 
-    environment {
-        PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
-    }
 
     stages {
 
