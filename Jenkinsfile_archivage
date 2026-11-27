@@ -23,6 +23,7 @@ pipeline {
                 bat 'node --version'
                 bat 'docker --version'
                 bat 'if not exist artifacts mkdir artifacts'
+                bat 'git tag'
 
                 script {
                     def version = bat(
