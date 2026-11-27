@@ -25,6 +25,7 @@ pipeline {
                 bat 'if not exist artifacts mkdir artifacts'
                 bat 'git tag'
 
+                /*pushin it tag*/
                 script {
     def output = bat(
         script: '@echo off\r\ngit describe --tags --exact-match HEAD',
