@@ -1,26 +1,30 @@
 
 pipeline {
     agent any
+
     environment {
-    PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
-}
+        PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
+    }
 
     stages {
 
+        // 1. Checkout
         stage("Checkout") {
             steps {
-                echo "Source code already checked out in Jenkins configuration"
+                echo "Source code checked out from Git"
             }
         }
 
+        // 2. Setup
         stage("Setup") {
             steps {
                 bat 'node --version'
                 bat 'docker --version'
-                echo "Environment verification completed"
+                echo "Environment ready"
             }
         }
 
+        // 3. Build
         stage("Build") {
             steps {
                 script {
@@ -45,15 +49,16 @@ pipeline {
             }
         }
 
+        // 4. Run (Docker)
         stage("Run (Docker)") {
             steps {
                 bat 'docker build -t taskflow:%BUILD_NUMBER% .'
-
                 bat 'docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:%BUILD_NUMBER%'
-                echo "TaskFlow Docker container started"
+                echo "Docker container started"
             }
         }
 
+        // 5. Smoke Test
         stage("Smoke Test") {
             steps {
                 script {
@@ -62,17 +67,12 @@ pipeline {
                     def result = powershell(
                         returnStatus: true,
                         script: '''
-                            $url = "http://localhost:8082"
                             $success = $false
 
-                            for ($i = 1; $i -le 10; $i++) {
+                            for ($i = 0; $i -lt 10 -and !$success; $i++) {
                                 try {
-                                    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
-
-                                    if ($response.StatusCode -eq 200) {
-                                        $success = $true
-                                        break
-                                    }
+                                    $response = Invoke-WebRequest "http://localhost:8082" -UseBasicParsing -TimeoutSec 3
+                                    $success = ($response.StatusCode -eq 200)
                                 }
                                 catch {
                                     Start-Sleep -Seconds 2
@@ -80,15 +80,12 @@ pipeline {
                             }
 
                             if ($success) {
-                                "PASSED - TaskFlow application is responding correctly" |
-                                    Out-File -FilePath "artifacts/smoke-test.txt"
+                                "PASSED - Application is responding" | Out-File artifacts/smoke-test.txt
                                 exit 0
                             }
-                            else {
-                                "FAILED - TaskFlow application is not responding" |
-                                    Out-File -FilePath "artifacts/smoke-test.txt"
-                                exit 1
-                            }
+
+                            "FAILED - Application is not responding" | Out-File artifacts/smoke-test.txt
+                            exit 1
                         '''
                     )
 
@@ -101,6 +98,7 @@ pipeline {
             }
         }
 
+        // 6. Archive Artifacts
         stage("Archive Artifacts") {
             steps {
                 bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
