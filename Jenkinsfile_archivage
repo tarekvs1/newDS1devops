@@ -32,7 +32,7 @@ pipeline {
                     ).trim()
 
                     if (!(version ==~ /^v\\d+\\.\\d+\\.\\d+$/)) {
-                        error "Invalid version tag: ${version}. Expected vX.Y.Z"
+                        error "Invalid version tag: ${version}. Expected v1.0.1"
                     }
 
                     env.TAG_NAME = version
