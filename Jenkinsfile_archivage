@@ -12,7 +12,7 @@ pipeline {
 
     stages {
 
-        // 1. CHECKOUT
+        // 1. Checkout
         stage("Checkout") {
             steps {
                 echo "Source code checked out from Git"
@@ -20,7 +20,7 @@ pipeline {
             }
         }
 
-        // 2. SETUP
+        // 2. Setup
         stage("Setup") {
             steps {
                 bat 'node --version'
@@ -29,14 +29,12 @@ pipeline {
 
                 script {
                     def version = bat(
-                        script: '@git describe --tags --abbrev=0',
+                        script: '@git describe --tags --exact-match HEAD',
                         returnStdout: true
                     ).trim()
 
-                    echo "TAG DETECTED: [${version}]"
-
-                    if (!(version ==~ /^v\d+\.\d+\.\d+$/)) {
-                        error "Invalid version tag. Expected format: vX.Y.Z. Detected: ${version}"
+                    if (!(version ==~ /^v\\d+\\.\\d+\\.\\d+$/)) {
+                        error "Invalid version tag: ${version}. Expected vX.Y.Z"
                     }
 
                     env.TAG_NAME = version
@@ -46,10 +44,11 @@ pipeline {
             }
         }
 
-        // 3. BUILD
+        // 3. Build
         stage("Build") {
             steps {
                 script {
+
                     if (!fileExists("index.html")) {
                         error "index.html does not exist"
                     }
@@ -68,18 +67,24 @@ pipeline {
 
                     echo "All application files are available"
 
-                    // Parallel JavaScript syntax checks
+                    // Parallel Node.js checks
                     def checks = [:]
 
                     ["22", "24"].each { version ->
                         checks["Node.js ${version}"] = {
-                            bat "docker run --rm -v \"%WORKSPACE%:/app\" -w /app node:${version}-alpine node --check script.js"
+                            bat """
+                                docker run --rm ^
+                                -v "%WORKSPACE%:/app" ^
+                                -w /app ^
+                                node:${version}-alpine ^
+                                node --check script.js
+                            """
                         }
                     }
 
                     parallel checks
 
-                    echo "Parallel syntax checks completed"
+                    echo "Parallel checks passed"
 
                     // Build versioned Docker image
                     bat "docker build -t taskflow:${env.TAG_NAME} . > artifacts\\build.log 2>&1"
@@ -89,33 +94,28 @@ pipeline {
             }
         }
 
-        // 4. RUN DOCKER
+        // 4. Run (Docker)
         stage("Run (Docker)") {
             steps {
                 bat "docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:${env.TAG_NAME}"
 
-                echo "Versioned TaskFlow container started"
+                echo "Versioned Docker container started"
             }
         }
 
-        // 5. SMOKE TEST
+        // 5. Smoke Test
         stage("Smoke Test") {
             steps {
                 script {
                     def result = powershell(
                         returnStatus: true,
                         script: '''
-                            $url = "http://localhost:8082"
                             $success = $false
 
-                            for ($i = 1; $i -le 10; $i++) {
+                            for ($i = 0; $i -lt 10 -and !$success; $i++) {
                                 try {
-                                    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
-
-                                    if ($response.StatusCode -eq 200) {
-                                        $success = $true
-                                        break
-                                    }
+                                    $response = Invoke-WebRequest "http://localhost:8082" -UseBasicParsing -TimeoutSec 3
+                                    $success = ($response.StatusCode -eq 200)
                                 }
                                 catch {
                                     Start-Sleep -Seconds 2
@@ -123,15 +123,14 @@ pipeline {
                             }
 
                             if ($success) {
-                                "PASSED - Versioned TaskFlow application is responding correctly" |
-                                    Out-File -FilePath "artifacts/smoke-test.txt" -Encoding utf8
+                                "PASSED - Versioned TaskFlow is responding correctly" |
+                                    Out-File artifacts/smoke-test.txt -Encoding utf8
                                 exit 0
                             }
-                            else {
-                                "FAILED - Versioned TaskFlow application is not responding" |
-                                    Out-File -FilePath "artifacts/smoke-test.txt" -Encoding utf8
-                                exit 1
-                            }
+
+                            "FAILED - Versioned TaskFlow is not responding" |
+                                Out-File artifacts/smoke-test.txt -Encoding utf8
+                            exit 1
                         '''
                     )
 
@@ -139,25 +138,39 @@ pipeline {
                         error "Smoke Test Failed"
                     }
 
-                    echo "Versioned Smoke Test Passed"
+                    echo "Smoke Test Passed"
                 }
             }
         }
 
-        // 6. ARCHIVE ARTIFACTS
+        // 6. Archive Artifacts
         stage("Archive Artifacts") {
             steps {
-                bat "docker save taskflow:${env.TAG_NAME} -o artifacts\\taskflow-${env.TAG_NAME}.tar"
+                script {
+                    writeFile(
+                        file: 'artifacts/pipeline-report.txt',
+                        text: """TASKFLOW VERSIONED BUILD REPORT
 
-                bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
+Job Name: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Build URL: ${env.BUILD_URL}
+Version Tag: ${env.TAG_NAME}
+Build Result: ${currentBuild.currentResult}
+
+Artifacts:
+- build.log
+- smoke-test.txt
+- pipeline-report.txt
+"""
+                    )
+                }
 
                 archiveArtifacts(
-                    artifacts: 'artifacts/*',
-                    fingerprint: true,
-                    allowEmptyArchive: true
+                    artifacts: 'artifacts/build.log, artifacts/smoke-test.txt, artifacts/pipeline-report.txt',
+                    fingerprint: true
                 )
 
-                echo "Versioned Docker image exported and artifacts archived"
+                echo "Versioned artifacts archived successfully"
             }
         }
     }
@@ -165,15 +178,17 @@ pipeline {
     post {
         always {
             script {
-                // Save Docker logs if available
+                // Create missing files if a stage failed
                 bat '''
-                    docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1 || echo Container logs unavailable > artifacts\\docker.log
+                    if not exist artifacts mkdir artifacts
+                    if not exist artifacts\\build.log echo Build log unavailable > artifacts\\build.log
+                    if not exist artifacts\\smoke-test.txt echo Smoke Test not executed > artifacts\\smoke-test.txt
                 '''
 
-                // Generate version report
-                def report = """
-TASKFLOW VERSIONED BUILD REPORT
-================================
+                // Generate pipeline report
+                writeFile(
+                    file: 'artifacts/pipeline-report.txt',
+                    text: """TASKFLOW VERSIONED BUILD REPORT
 
 Job Name: ${env.JOB_NAME}
 Build Number: ${env.BUILD_NUMBER}
@@ -184,29 +199,23 @@ Build Result: ${currentBuild.currentResult}
 Artifacts:
 - build.log
 - smoke-test.txt
-- docker.log
-- taskflow-${env.TAG_NAME ?: 'unknown'}.tar
 - pipeline-report.txt
 """
-
-                writeFile(
-                    file: 'artifacts/pipeline-report.txt',
-                    text: report
                 )
 
-                // Archive artifacts even if a stage fails
-                archiveArtifacts(
-                    artifacts: 'artifacts/*',
-                    fingerprint: true,
-                    allowEmptyArchive: true
-                )
+                // Archive artifacts after failure
+                if (currentBuild.currentResult != 'SUCCESS') {
+                    archiveArtifacts(
+                        artifacts: 'artifacts/build.log, artifacts/smoke-test.txt, artifacts/pipeline-report.txt',
+                        fingerprint: true
+                    )
+                }
             }
 
             // Docker cleanup
             bat 'docker rm -f taskflow-%BUILD_NUMBER% 2>nul || exit /b 0'
 
             echo "Docker cleanup completed"
-            echo "Versioned artifacts archived"
         }
 
         success {
