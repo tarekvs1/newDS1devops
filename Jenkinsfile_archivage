@@ -26,6 +26,7 @@ pipeline {
                 bat 'git tag'
 
                 /*pushin it tag*/
+                /*push now in tag v1.0.1*/
                 script {
     def output = bat(
         script: '@echo off\r\ngit describe --tags --exact-match HEAD',
