@@ -26,19 +26,23 @@ pipeline {
                 bat 'git tag'
 
                 script {
-                    def version = bat(
-                        script: '@git describe --tags --exact-match HEAD',
-                        returnStdout: true
-                    ).trim()
+    def version = bat(
+        script: '@git describe --tags --exact-match HEAD',
+        returnStdout: true
+    ).trim()
 
-                    if (!(version ==~ /^v\d+\.\d+\.\d+$/)) {
-    error "Invalid version tag: ${version}. Expected vX.Y.Z"
+    version = version.replaceAll("\\s", "")
+
+    echo "Detected version: [${version}]"
+
+    if (!version.matches("v[0-9]+\\.[0-9]+\\.[0-9]+")) {
+        error "Invalid version tag: ${version}. Expected vX.Y.Z"
+    }
+
+    env.TAG_NAME = version
+
+    echo "Version detected: ${env.TAG_NAME}"
 }
-
-                    env.TAG_NAME = version
-
-                    echo "Version detected: ${env.TAG_NAME}"
-                }
             }
         }
 
