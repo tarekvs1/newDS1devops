@@ -99,18 +99,18 @@ pipeline {
         }
 
         // 6. Archive Artifacts
-        stage("Archive Artifacts") {
-            steps {
-                bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
+        
+stage("Archive Artifacts") {
+    steps {
+        archiveArtifacts(
+            artifacts: 'artifacts/build.log, artifacts/smoke-test.txt, artifacts/pipeline-report.txt',
+            fingerprint: true
+        )
 
-                archiveArtifacts(
-                    artifacts: 'artifacts/*',
-                    fingerprint: true
-                )
+        echo "Required artifacts archived successfully"
+    }
+}
 
-                echo "Artifacts archived successfully"
-            }
-        }
     }
 
     post {
