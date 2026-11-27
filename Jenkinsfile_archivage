@@ -31,9 +31,9 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    if (!(version ==~ /^v\\d+\\.\\d+\\.\\d+$/)) {
-                        error "Invalid version tag: ${version}. Expected v1.0.1"
-                    }
+                    if (!(version ==~ /^v\d+\.\d+\.\d+$/)) {
+    error "Invalid version tag: ${version}. Expected vX.Y.Z"
+}
 
                     env.TAG_NAME = version
 
